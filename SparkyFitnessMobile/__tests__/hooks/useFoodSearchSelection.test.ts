@@ -85,6 +85,27 @@ describe('useFoodSearchSelection', () => {
     expect(result.current.count).toBe(2);
   });
 
+  test('capacity reporting stays honest across toggles inside one batch', () => {
+    // Regression: three adds in a single act() against a 2-item cap. The
+    // third must report rejection (false) — not claim success while the
+    // state update is silently dropped.
+    const { result } = renderHook(() => useFoodSearchSelection(2));
+
+    let first = true;
+    let second = true;
+    let third = true;
+    act(() => {
+      first = result.current.toggle(makeFood('f1', 'v1'));
+      second = result.current.toggle(makeFood('f2', 'v1'));
+      third = result.current.toggle(makeFood('f3', 'v1'));
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(true);
+    expect(third).toBe(false);
+    expect(result.current.count).toBe(2);
+  });
+
   test('addMany deduplicates and truncates at the cap, reporting additions', () => {
     const { result } = renderHook(() => useFoodSearchSelection(3));
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { FoodItem } from '../types/foods';
 import {
   MULTI_ADD_MAX_ITEMS,
@@ -15,9 +15,21 @@ import {
  * returned counts so this hook stays free of presentation concerns.
  */
 export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
+  // The ref is the synchronous source of truth; the state is only its
+  // render-time projection. Capacity decisions must hold across several
+  // calls inside one React batch, where a state closure is stale — the same
+  // stale-state-under-batched-updates shape utils/duplicatePress.ts guards
+  // against (#2191). Every mutation updates the ref first, then publishes an
+  // immutable copy to state.
+  const basketRef = useRef<Map<string, FoodItem>>(new Map());
   const [selectedByKey, setSelectedByKey] = useState<Map<string, FoodItem>>(
     () => new Map()
   );
+
+  const commit = useCallback((next: Map<string, FoodItem>) => {
+    basketRef.current = next;
+    setSelectedByKey(next);
+  }, []);
 
   const selectedFoods = useMemo(
     () => Array.from(selectedByKey.values()),
@@ -34,35 +46,28 @@ export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
 
   /**
    * Toggles one food. Returns true when the basket changed; false when the
-   * add was rejected because the basket is at capacity. Decided against
-   * current state rather than inside the state updater — React defers
-   * updater execution to render, so an updater side-channel cannot report
-   * the outcome synchronously.
+   * add was rejected because the basket is at capacity. The outcome is
+   * accurate even when several toggles run inside one React batch.
    */
   const toggle = useCallback(
     (food: FoodItem): boolean => {
+      const current = basketRef.current;
       const key = multiAddKeyForFood(food);
-      if (selectedByKey.has(key)) {
-        setSelectedByKey((prev) => {
-          if (!prev.has(key)) return prev;
-          const next = new Map(prev);
-          next.delete(key);
-          return next;
-        });
+      if (current.has(key)) {
+        const next = new Map(current);
+        next.delete(key);
+        commit(next);
         return true;
       }
-      if (selectedByKey.size >= maxItems) {
+      if (current.size >= maxItems) {
         return false;
       }
-      setSelectedByKey((prev) => {
-        if (prev.has(key) || prev.size >= maxItems) return prev;
-        const next = new Map(prev);
-        next.set(key, food);
-        return next;
-      });
+      const next = new Map(current);
+      next.set(key, food);
+      commit(next);
       return true;
     },
-    [maxItems, selectedByKey]
+    [commit, maxItems]
   );
 
   /**
@@ -72,43 +77,41 @@ export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
    */
   const addMany = useCallback(
     (foods: FoodItem[]): number => {
-      const keys = new Set(selectedByKey.keys());
-      const additions = new Map<string, FoodItem>();
+      const next = new Map(basketRef.current);
+      let added = 0;
       for (const food of foods) {
-        if (selectedByKey.size + additions.size >= maxItems) break;
+        if (next.size >= maxItems) break;
         const key = multiAddKeyForFood(food);
-        if (keys.has(key)) continue;
-        keys.add(key);
-        additions.set(key, food);
+        if (next.has(key)) continue;
+        next.set(key, food);
+        added++;
       }
-      if (additions.size === 0) return 0;
-      setSelectedByKey((prev) => {
-        const next = new Map(prev);
-        for (const [key, food] of additions) {
-          next.set(key, food);
-        }
-        return next;
-      });
-      return additions.size;
+      if (added === 0) return 0;
+      commit(next);
+      return added;
     },
-    [maxItems, selectedByKey]
+    [commit, maxItems]
   );
 
   /** Removes basket rows by key, e.g. confirmed successes after a batch. */
-  const removeKeys = useCallback((keys: readonly string[]) => {
-    if (keys.length === 0) return;
-    setSelectedByKey((prev) => {
-      const next = new Map(prev);
+  const removeKeys = useCallback(
+    (keys: readonly string[]) => {
+      if (keys.length === 0) return;
+      const current = basketRef.current;
+      if (!keys.some((key) => current.has(key))) return;
+      const next = new Map(current);
       for (const key of keys) {
         next.delete(key);
       }
-      return next;
-    });
-  }, []);
+      commit(next);
+    },
+    [commit]
+  );
 
   const clear = useCallback(() => {
-    setSelectedByKey((prev) => (prev.size === 0 ? prev : new Map()));
-  }, []);
+    if (basketRef.current.size === 0) return;
+    commit(new Map());
+  }, [commit]);
 
   return {
     selectedFoods,
