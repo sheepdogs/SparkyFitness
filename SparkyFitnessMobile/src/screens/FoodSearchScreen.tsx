@@ -65,6 +65,7 @@ import { useProviderColor } from '../utils/providerColor';
 import { interleaveTopMatches } from '../utils/topMatches';
 import { mergeRecent, mergeFrequent, landingKey } from '../utils/landingLists';
 import type { LandingEntry } from '../utils/landingLists';
+import { useFoodSearchSelection } from '../hooks/useFoodSearchSelection';
 import { useHeaderActionColors } from '../hooks/useHeaderActionColors';
 import {
   createNativeHeaderAccentBadge,
@@ -195,6 +196,53 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
   const addButtonRef = useRef<View>(null);
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState<AnchorRect | null>(null);
+
+  // Multi-select basket (#1980). Diary logging only — picker modes (meal
+  // builder, meal plan, container link) emit single selections and stay
+  // untouched. The basket is deliberately independent of select MODE: mode
+  // only switches the row affordances, so a basket survives typing a search
+  // and single-tap adds; only Clear or a completed batch empties it.
+  const multiSelectAvailable = pickerMode === 'log-entry';
+  const {
+    count: selectionCount,
+    maxItems: selectionMaxItems,
+    isSelected: isFoodSelected,
+    toggle: toggleFoodSelection,
+    addMany: addFoodsToSelection,
+    clear: clearSelection,
+  } = useFoodSearchSelection();
+  const [isSelectMode, setIsSelectMode] = useState(false);
+
+  const handleToggleFoodSelection = useCallback(
+    (food: FoodItem) => {
+      // toggle() returns false only for an over-cap add (removals always
+      // succeed), so this toast never fires for a deselect.
+      if (!toggleFoodSelection(food)) {
+        Toast.show({
+          type: 'error',
+          text1: t('foodSearch.multiSelect.limitReached', {
+            defaultValue: 'You can select up to {{limit}} foods',
+            limit: selectionMaxItems,
+          }),
+        });
+      }
+    },
+    [toggleFoodSelection, t, selectionMaxItems]
+  );
+
+  const handleSelectAllInSection = useCallback(
+    (entries: LandingEntry[]) => {
+      addFoodsToSelection(
+        entries
+          .filter((entry) => entry.kind === 'food')
+          .map((entry) => entry.food)
+      );
+      // Silently truncates at the cap: already-selected rows dedupe and the
+      // cap toast fires from the row toggle, so a second toast here would
+      // fire for duplicates, not just truncation.
+    },
+    [addFoodsToSelection]
+  );
 
   // Local foods: the hook itself only fetches once the query is >= 2 chars.
   const { searchResults, isSearching, isSearchActive } = useFoodSearch(
@@ -358,12 +406,23 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
         item,
         date,
         pickerMode: selectionPickerMode,
-        returnDepth: selectionPickerMode ? 2 : undefined,
+        // With a basket in progress, pop back here after the single add so
+        // the basket (hook state on this screen) survives; depth 1 undoes the
+        // push onto FoodEntryAdd. Picker modes keep their existing depth-2
+        // return past this screen.
+        returnDepth: selectionPickerMode ? 2 : isSelectMode ? 1 : undefined,
         mealTypeId,
         mealPlanTarget,
       });
     },
-    [navigation, date, mealPlanTarget, mealTypeId, selectionPickerMode]
+    [
+      navigation,
+      date,
+      mealPlanTarget,
+      mealTypeId,
+      selectionPickerMode,
+      isSelectMode,
+    ]
   );
 
   const openCreateFood = useCallback(() => {
@@ -1128,6 +1187,29 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
         )}
       </View>
 
+      {multiSelectAvailable && (
+        <Button
+          variant="ghost"
+          onPress={() => setIsSelectMode((prev) => !prev)}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          className="p-0"
+          accessibilityLabel={
+            isSelectMode
+              ? t('foodSearch.multiSelect.cancel', { defaultValue: 'Cancel' })
+              : t('foodSearch.multiSelect.select', { defaultValue: 'Select' })
+          }
+        >
+          <Text
+            className="text-sm font-semibold"
+            style={{ color: headerActionColor }}
+          >
+            {isSelectMode
+              ? t('foodSearch.multiSelect.cancel', { defaultValue: 'Cancel' })
+              : t('foodSearch.multiSelect.select', { defaultValue: 'Select' })}
+          </Text>
+        </Button>
+      )}
+
       {!usesNativeHeader && (
         <View ref={addButtonRef} collapsable={false}>
           <Button
@@ -1260,10 +1342,34 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
               favoriteKeys={favoriteKeys}
               favoriteGold={favoriteGold}
               onSelect={showFoodInfo}
+              selection={
+                isSelectMode && item.kind === 'food'
+                  ? {
+                      isSelected: isFoodSelected(item.food),
+                      onToggle: () => handleToggleFoodSelection(item.food),
+                      accentColor,
+                      inactiveColor: textMuted,
+                    }
+                  : undefined
+              }
             />
           )}
           renderSectionHeader={({ section }) => (
-            <SectionTitleHeader title={section.title} />
+            <SectionTitleHeader
+              title={section.title}
+              action={
+                isSelectMode &&
+                section.data.some((entry) => entry.kind === 'food')
+                  ? {
+                      label: t('foodSearch.multiSelect.selectAll', {
+                        defaultValue: 'Select all',
+                      }),
+                      onPress: () => handleSelectAllInSection(section.data),
+                      color: accentColor,
+                    }
+                  : undefined
+              }
+            />
           )}
           stickySectionHeadersEnabled
           keyboardShouldPersistTaps="handled"
@@ -1281,6 +1387,43 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
     >
       {renderHeaderBar()}
       {renderBody()}
+      {/* Basket bar: visible whenever anything is selected, in or out of
+          select mode, so a basket built on the landing list is not silently
+          lost after Cancel or while searching. */}
+      {selectionCount > 0 && (
+        <View
+          className="absolute left-4 right-4 rounded-xl bg-raised border border-border-subtle flex-row items-center justify-between px-4 py-3"
+          style={{ bottom: insets.bottom + 12 }}
+        >
+          <Text
+            className="text-text-primary text-sm font-semibold"
+            accessibilityLabel={t('foodSearch.multiSelect.selected', {
+              defaultValue: '{{count}} selected',
+              count: selectionCount,
+            })}
+          >
+            {t('foodSearch.multiSelect.selected', {
+              defaultValue: '{{count}} selected',
+              count: selectionCount,
+            })}
+          </Text>
+          <Button
+            variant="ghost"
+            onPress={clearSelection}
+            className="p-0"
+            accessibilityLabel={t('foodSearch.multiSelect.clear', {
+              defaultValue: 'Clear',
+            })}
+          >
+            <Text
+              className="text-sm font-semibold"
+              style={{ color: accentColor }}
+            >
+              {t('foodSearch.multiSelect.clear', { defaultValue: 'Clear' })}
+            </Text>
+          </Button>
+        </View>
+      )}
       <AnchoredMenu
         visible={menuVisible}
         anchor={menuAnchor}

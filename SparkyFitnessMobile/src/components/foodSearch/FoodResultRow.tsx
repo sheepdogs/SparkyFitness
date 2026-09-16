@@ -14,12 +14,26 @@ import { useOpenLightbox } from '../LightboxProvider';
 import type { FoodInfoItem } from '../../types/foodInfo';
 import type { FoodItem, TopFoodItem } from '../../types/foods';
 
+/**
+ * Multi-select affordance for the food-search landing lists (#1980). When
+ * present, the row toggles basket selection instead of navigating, and shows
+ * a leading checkbox glyph. Colors come from the caller (which owns the
+ * theme's CSS variables) because this row keeps to className styling.
+ */
+export interface FoodRowSelection {
+  isSelected: boolean;
+  onToggle: () => void;
+  accentColor: string;
+  inactiveColor: string;
+}
+
 interface FoodResultRowProps {
   item: FoodItem | TopFoodItem;
   profileId?: string;
   isFavorite: boolean;
   favoriteGold: string;
   onSelect: (item: FoodInfoItem) => void;
+  selection?: FoodRowSelection;
 }
 
 const FoodResultRow: React.FC<FoodResultRowProps> = ({
@@ -28,6 +42,7 @@ const FoodResultRow: React.FC<FoodResultRowProps> = ({
   isFavorite,
   favoriteGold,
   onSelect,
+  selection,
 }) => {
   const { t } = useTranslation();
   const status = deriveShareStatus(
@@ -43,6 +58,23 @@ const FoodResultRow: React.FC<FoodResultRowProps> = ({
   // FoodLibraryRow.
   return (
     <View className="flex-row items-center border-b border-border-subtle">
+      {selection ? (
+        <View className="pl-3 py-2">
+          <Icon
+            name={
+              selection.isSelected
+                ? 'checkmark-circle-filled'
+                : 'checkmark-circle'
+            }
+            size={22}
+            color={
+              selection.isSelected
+                ? selection.accentColor
+                : selection.inactiveColor
+            }
+          />
+        </View>
+      ) : null}
       <View className="pl-4 py-2">
         <FoodThumbnail
           image={primaryImageOf(item)}
@@ -58,7 +90,21 @@ const FoodResultRow: React.FC<FoodResultRowProps> = ({
       <TouchableOpacity
         className="flex-1 flex-row justify-between items-center pr-4 py-2"
         activeOpacity={0.7}
-        onPress={() => onSelect(foodItemToFoodInfo(item))}
+        accessibilityRole={selection ? 'checkbox' : undefined}
+        accessibilityState={
+          selection ? { checked: selection.isSelected } : undefined
+        }
+        accessibilityLabel={
+          selection
+            ? t('foodSearch.multiSelect.foodCheckbox', {
+                defaultValue: 'Select {{name}}',
+                name: item.name,
+              })
+            : undefined
+        }
+        onPress={() =>
+          selection ? selection.onToggle() : onSelect(foodItemToFoodInfo(item))
+        }
       >
         <View className="flex-1 mx-3">
           <View className="flex-row items-start gap-1">

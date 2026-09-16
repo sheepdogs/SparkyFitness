@@ -1012,7 +1012,12 @@ const FoodEntryAddScreen: React.FC<FoodEntryAddScreenProps> = ({
         }
       }
       invalidateCache(selectedDate);
-      navigation.dispatch(StackActions.popToTop());
+      // Log-entry adds normally return to the diary root; a returnDepth (set
+      // when launched from the food-search basket so the basket survives)
+      // pops back that many screens instead.
+      navigation.dispatch(
+        returnDepth ? StackActions.pop(returnDepth) : StackActions.popToTop()
+      );
     },
   });
 
@@ -1023,7 +1028,9 @@ const FoodEntryAddScreen: React.FC<FoodEntryAddScreenProps> = ({
   } = useAddFoodEntryMeal({
     onSuccess: () => {
       invalidateMealCache(selectedDate);
-      navigation.dispatch(StackActions.popToTop());
+      navigation.dispatch(
+        returnDepth ? StackActions.pop(returnDepth) : StackActions.popToTop()
+      );
     },
   });
 
