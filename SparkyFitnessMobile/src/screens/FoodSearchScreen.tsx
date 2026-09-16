@@ -232,17 +232,38 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
 
   const handleSelectAllInSection = useCallback(
     (entries: LandingEntry[]) => {
-      addFoodsToSelection(
-        entries
-          .filter((entry) => entry.kind === 'food')
-          .map((entry) => entry.food)
-      );
-      // Silently truncates at the cap: already-selected rows dedupe and the
-      // cap toast fires from the row toggle, so a second toast here would
-      // fire for duplicates, not just truncation.
+      const foods = entries
+        .filter((entry) => entry.kind === 'food')
+        .map((entry) => entry.food);
+      const uniquePending = foods.filter(
+        (food) => !isFoodSelected(food)
+      ).length;
+      addFoodsToSelection(foods);
+      // addMany dedupes silently (rightly), so truncation is detected from
+      // the basket's remaining headroom rather than its return count — a
+      // smaller return alone can mean nothing but duplicates.
+      if (selectionCount + uniquePending > selectionMaxItems) {
+        Toast.show({
+          type: 'error',
+          text1: t('foodSearch.multiSelect.limitReached', {
+            defaultValue: 'You can select up to {{limit}} foods',
+            limit: selectionMaxItems,
+          }),
+        });
+      }
     },
-    [addFoodsToSelection]
+    [addFoodsToSelection, isFoodSelected, selectionCount, selectionMaxItems, t]
   );
+
+  // Single-tap flows launched while a basket exists must return here (depth
+  // 1), or their success pop unmounts this screen and silently drops the
+  // basket. Gate on the basket, not on select mode — the basket deliberately
+  // outlives Cancel.
+  const basketTapReturnDepth = selectionPickerMode
+    ? 2
+    : isSelectMode || selectionCount > 0
+      ? 1
+      : undefined;
 
   // Local foods: the hook itself only fetches once the query is >= 2 chars.
   const { searchResults, isSearching, isSearchActive } = useFoodSearch(
@@ -406,11 +427,9 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
         item,
         date,
         pickerMode: selectionPickerMode,
-        // With a basket in progress, pop back here after the single add so
-        // the basket (hook state on this screen) survives; depth 1 undoes the
-        // push onto FoodEntryAdd. Picker modes keep their existing depth-2
-        // return past this screen.
-        returnDepth: selectionPickerMode ? 2 : isSelectMode ? 1 : undefined,
+        // basketTapReturnDepth keeps a basket alive across a single add;
+        // picker modes keep their existing depth-2 return past this screen.
+        returnDepth: basketTapReturnDepth,
         mealTypeId,
         mealPlanTarget,
       });
@@ -421,7 +440,7 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
       mealPlanTarget,
       mealTypeId,
       selectionPickerMode,
-      isSelectMode,
+      basketTapReturnDepth,
     ]
   );
 
@@ -430,10 +449,16 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
       mode: 'create-food',
       date,
       pickerMode: selectionPickerMode,
-      returnDepth: selectionPickerMode ? 2 : undefined,
+      returnDepth: basketTapReturnDepth,
       mealPlanTarget,
     });
-  }, [navigation, date, mealPlanTarget, selectionPickerMode]);
+  }, [
+    navigation,
+    date,
+    mealPlanTarget,
+    selectionPickerMode,
+    basketTapReturnDepth,
+  ]);
 
   const openMealAdd = useCallback(() => {
     navigation.navigate('MealAdd');
@@ -443,7 +468,7 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
     navigation.navigate('FoodScan', {
       date,
       pickerMode: selectionPickerMode,
-      returnDepth: selectionPickerMode ? 2 : undefined,
+      returnDepth: basketTapReturnDepth,
       // Preserve the originating meal type (MealTypeDetail → FoodSearch → scan).
       mealTypeId: mealTypeId ?? undefined,
       mealPlanTarget,
@@ -453,7 +478,14 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
       // user's Barcode Scanning setting. Let the server resolve the preference,
       // matching the "+" → Scan Food entry point.
     });
-  }, [navigation, date, mealPlanTarget, mealTypeId, selectionPickerMode]);
+  }, [
+    navigation,
+    date,
+    mealPlanTarget,
+    mealTypeId,
+    selectionPickerMode,
+    basketTapReturnDepth,
+  ]);
 
   // Only the custom-header path opens the JS menu; on the native path the
   // system presents a UIMenu from the header item directly.
@@ -1276,6 +1308,9 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             contentContainerClassName="pb-safe-or-4"
+            contentContainerStyle={
+              selectionCount > 0 ? { paddingBottom: 88 } : undefined
+            }
           />
         </View>
       );
@@ -1375,6 +1410,9 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           contentContainerClassName="pb-safe-or-4"
+          contentContainerStyle={
+            selectionCount > 0 ? { paddingBottom: 88 } : undefined
+          }
         />
       </View>
     );

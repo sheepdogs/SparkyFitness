@@ -1012,11 +1012,17 @@ const FoodEntryAddScreen: React.FC<FoodEntryAddScreenProps> = ({
         }
       }
       invalidateCache(selectedDate);
-      // Log-entry adds normally return to the diary root; a returnDepth (set
-      // when launched from the food-search basket so the basket survives)
-      // pops back that many screens instead.
+      // Log-entry adds normally return to the diary root. A returnDepth
+      // param (set when launched with a food-search basket in progress)
+      // pops back that many screens so the basket survives. Read the param
+      // directly — the `returnDepth` local above defaults to 1 for the
+      // picker-mode flows, and using it here would turn every plain add
+      // into a one-screen pop.
+      const logEntryReturnDepth = route.params?.returnDepth;
       navigation.dispatch(
-        returnDepth ? StackActions.pop(returnDepth) : StackActions.popToTop()
+        logEntryReturnDepth
+          ? StackActions.pop(logEntryReturnDepth)
+          : StackActions.popToTop()
       );
     },
   });
@@ -1028,8 +1034,11 @@ const FoodEntryAddScreen: React.FC<FoodEntryAddScreenProps> = ({
   } = useAddFoodEntryMeal({
     onSuccess: () => {
       invalidateMealCache(selectedDate);
+      const mealReturnDepth = route.params?.returnDepth;
       navigation.dispatch(
-        returnDepth ? StackActions.pop(returnDepth) : StackActions.popToTop()
+        mealReturnDepth
+          ? StackActions.pop(mealReturnDepth)
+          : StackActions.popToTop()
       );
     },
   });

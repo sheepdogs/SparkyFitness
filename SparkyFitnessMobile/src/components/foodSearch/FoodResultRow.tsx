@@ -58,23 +58,6 @@ const FoodResultRow: React.FC<FoodResultRowProps> = ({
   // FoodLibraryRow.
   return (
     <View className="flex-row items-center border-b border-border-subtle">
-      {selection ? (
-        <View className="pl-3 py-2">
-          <Icon
-            name={
-              selection.isSelected
-                ? 'checkmark-circle-filled'
-                : 'checkmark-circle'
-            }
-            size={22}
-            color={
-              selection.isSelected
-                ? selection.accentColor
-                : selection.inactiveColor
-            }
-          />
-        </View>
-      ) : null}
       <View className="pl-4 py-2">
         <FoodThumbnail
           image={primaryImageOf(item)}
@@ -106,7 +89,24 @@ const FoodResultRow: React.FC<FoodResultRowProps> = ({
           selection ? selection.onToggle() : onSelect(foodItemToFoodInfo(item))
         }
       >
-        <View className="flex-1 mx-3">
+        {selection ? (
+          <View className="mr-3">
+            <Icon
+              name={
+                selection.isSelected
+                  ? 'checkmark-circle-filled'
+                  : 'checkmark-circle'
+              }
+              size={22}
+              color={
+                selection.isSelected
+                  ? selection.accentColor
+                  : selection.inactiveColor
+              }
+            />
+          </View>
+        ) : null}
+        <View className="flex-1">
           <View className="flex-row items-start gap-1">
             <Text className="text-text-primary text-base font-medium flex-shrink">
               {item.name}

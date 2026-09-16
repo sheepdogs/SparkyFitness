@@ -240,12 +240,17 @@ describe('FoodSearchScreen multi-select', () => {
     const screen = renderLanding();
     fireEvent.press(screen.getByLabelText('Select'));
 
+    const row = screen.getByLabelText('Select Greek Chicken');
+    expect(row.props.accessibilityState).toMatchObject({ checked: false });
+
     fireEvent.press(screen.getByText('Greek Chicken'));
     expect(navigation.navigate).not.toHaveBeenCalled();
     expect(screen.getByText('1 selected')).toBeTruthy();
+    expect(row.props.accessibilityState).toMatchObject({ checked: true });
 
     fireEvent.press(screen.getByText('Greek Chicken'));
     expect(screen.queryByText('1 selected')).toBeNull();
+    expect(row.props.accessibilityState).toMatchObject({ checked: false });
   });
 
   test('a meal row keeps single-tap navigation with a basket-preserving returnDepth', () => {
@@ -273,7 +278,7 @@ describe('FoodSearchScreen multi-select', () => {
     expect(screen.getByText('1 selected')).toBeTruthy();
   });
 
-  test('Cancel keeps the basket and restores normal row taps', () => {
+  test('Cancel keeps the basket and keeps single adds basket-preserving', () => {
     const screen = renderLanding();
     fireEvent.press(screen.getByLabelText('Select'));
     fireEvent.press(screen.getByText('Greek Chicken'));
@@ -283,12 +288,45 @@ describe('FoodSearchScreen multi-select', () => {
     // Basket survives exiting select mode.
     expect(screen.getByText('1 selected')).toBeTruthy();
 
-    // Rows navigate again, with no basket-preserving returnDepth.
+    // Rows navigate again — but with a basket still present, the add must
+    // return here (depth 1) rather than pop to the diary root, which would
+    // unmount this screen and silently drop the basket.
     fireEvent.press(screen.getByText('Greek Chicken'));
     expect(navigation.navigate).toHaveBeenCalledWith(
       'FoodEntryAdd',
-      expect.objectContaining({ returnDepth: undefined })
+      expect.objectContaining({ returnDepth: 1 })
     );
+  });
+
+  test('the basket survives typing a search and returning', () => {
+    const screen = renderLanding();
+    fireEvent.press(screen.getByLabelText('Select'));
+    fireEvent.press(screen.getByText('Greek Chicken'));
+
+    fireEvent.changeText(
+      screen.getByPlaceholderText('Search foods...'),
+      'chicken'
+    );
+    expect(screen.getByText('1 selected')).toBeTruthy();
+
+    fireEvent.changeText(screen.getByPlaceholderText('Search foods...'), '');
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    expect(screen.getByLabelText('Select Greek Chicken')).toBeTruthy();
+  });
+
+  test('Select all on a mixed section adds only the food rows', () => {
+    mockUseRecentMeals.mockReturnValue({
+      recentMeals: [buildMeal()],
+      isLoading: false,
+      isError: false,
+      refetch: jest.fn(),
+    } as any);
+    const screen = renderLanding();
+    fireEvent.press(screen.getByLabelText('Select'));
+    fireEvent.press(screen.getByLabelText('Select all'));
+
+    expect(screen.getByText('1 selected')).toBeTruthy();
+    expect(screen.queryByLabelText('Select Lunch Bowl')).toBeNull();
   });
 
   test('Clear empties the basket and hides the bar', () => {
