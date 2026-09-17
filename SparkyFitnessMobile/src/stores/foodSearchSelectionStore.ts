@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import type { FoodItem } from '../types/foods';
-import { multiAddKeyForFood } from '../utils/multiAddFoodEntries';
+import {
+  initialDraftQuantityText,
+  multiAddKeyForFood,
+} from '../utils/multiAddFoodEntries';
 
 export interface FoodDraftFields {
   /** Raw quantity text from the review row; parsed with parseDecimalInput. */
@@ -29,8 +32,6 @@ export interface AddManyResult {
   truncated: boolean;
 }
 
-const DEFAULT_QUANTITY_TEXT = '1';
-
 function dropKeys<T>(
   map: Map<string, T>,
   keys: readonly string[]
@@ -45,6 +46,15 @@ interface FoodSearchSelectionState {
   selectedByKey: Map<string, FoodItem>;
   drafts: Map<string, FoodDraftFields>;
   outcomes: Map<string, RowOutcomeStatus>;
+  /**
+   * True while a batch submission is in flight. Store-owned (not hook-local)
+   * so it survives the review screen remounting — a fresh hook instance must
+   * not be able to start a second batch over the first. All basket and draft
+   * mutations are refused while it is held; the batch hook clears it before
+   * the screen reconciles results (removeKeys/setOutcomes run unlocked).
+   */
+  isSubmitting: boolean;
+  setSubmitting: (submitting: boolean) => void;
   toggle: (
     food: FoodItem,
     maxItems: number,
@@ -81,8 +91,15 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
     selectedByKey: new Map(),
     drafts: new Map(),
     outcomes: new Map(),
+    isSubmitting: false,
+
+    setSubmitting: (submitting) => {
+      if (get().isSubmitting === submitting) return;
+      set({ isSubmitting: submitting });
+    },
 
     toggle: (food, maxItems, initialMealTypeId) => {
+      if (get().isSubmitting) return false;
       const { selectedByKey, drafts, outcomes } = get();
       const key = multiAddKeyForFood(food);
       if (selectedByKey.has(key)) {
@@ -100,7 +117,7 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
       nextSelected.set(key, food);
       const nextDrafts = new Map(drafts);
       nextDrafts.set(key, {
-        quantityText: DEFAULT_QUANTITY_TEXT,
+        quantityText: initialDraftQuantityText(food),
         mealTypeId: initialMealTypeId ?? '',
       });
       set({ selectedByKey: nextSelected, drafts: nextDrafts });
@@ -108,6 +125,7 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
     },
 
     addMany: (foods, maxItems, initialMealTypeId) => {
+      if (get().isSubmitting) return { added: 0, truncated: false };
       const { selectedByKey, drafts } = get();
       const nextSelected = new Map(selectedByKey);
       const nextDrafts = new Map(drafts);
@@ -122,7 +140,7 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
         }
         nextSelected.set(key, food);
         nextDrafts.set(key, {
-          quantityText: DEFAULT_QUANTITY_TEXT,
+          quantityText: initialDraftQuantityText(food),
           mealTypeId: initialMealTypeId ?? '',
         });
         added++;
@@ -134,6 +152,7 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
 
     removeKeys: (keys) => {
       if (keys.length === 0) return;
+      if (get().isSubmitting) return;
       const { selectedByKey, drafts, outcomes } = get();
       if (!keys.some((key) => selectedByKey.has(key))) return;
       set({
@@ -144,6 +163,7 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
     },
 
     clear: () => {
+      if (get().isSubmitting) return;
       if (get().selectedByKey.size === 0) return;
       set({
         selectedByKey: new Map(),
@@ -153,6 +173,7 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
     },
 
     updateDraft: (key, patch) => {
+      if (get().isSubmitting) return;
       const { drafts } = get();
       const current = drafts.get(key);
       if (!current) return;
@@ -162,6 +183,7 @@ export const useFoodSearchSelectionStore = create<FoodSearchSelectionState>(
     },
 
     applyMealTypeToAll: (mealTypeId) => {
+      if (get().isSubmitting) return;
       const { drafts } = get();
       if (drafts.size === 0) return;
       const next = new Map<string, FoodDraftFields>();
@@ -193,5 +215,6 @@ export function __resetFoodSearchSelectionStoreForTests(): void {
     selectedByKey: new Map(),
     drafts: new Map(),
     outcomes: new Map(),
+    isSubmitting: false,
   });
 }

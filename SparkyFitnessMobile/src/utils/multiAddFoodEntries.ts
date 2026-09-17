@@ -20,6 +20,23 @@ export function multiAddKeyForFood(food: FoodItem): string {
   return `${food.id}:${variantId ?? 'snapshot'}`;
 }
 
+/**
+ * Initial quantity text for a new draft. Quantity in this feature is
+ * denominated in the variant's serving unit (grams, ml, pieces) — NOT a
+ * serving multiplier — matching FoodEntryAddScreen, which seeds its input
+ * with the variant's serving size and where servings are counted as
+ * quantity / serving size. A plain '1' here would log one GRAM of a 100 g
+ * food while its row displays "100 g".
+ */
+export function initialDraftQuantityText(food: FoodItem): string {
+  // Typed required on FoodDefaultVariant, but these objects arrive as raw
+  // API JSON — guard the boundary rather than trust it.
+  const servingSize = food.default_variant?.serving_size;
+  return servingSize != null && Number.isFinite(servingSize)
+    ? String(servingSize)
+    : '1';
+}
+
 export interface MultiAddDraft {
   food: FoodItem;
   /**

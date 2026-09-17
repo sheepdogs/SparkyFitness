@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import Toast from 'react-native-toast-message';
@@ -13,6 +13,7 @@ import {
   type MultiAddDraft,
 } from '../utils/multiAddFoodEntries';
 import { dailySummaryQueryKey, foodsQueryKey } from './queryKeys';
+import { useFoodSearchSelectionStore } from '../stores/foodSearchSelectionStore';
 import type { RowOutcomeStatus } from './useFoodSearchSelection';
 
 /** Matches the health-sync orchestrators' fan-out width (see AGENTS.md);
@@ -61,16 +62,21 @@ export function useAddFoodEntriesBatch() {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // In-flight latch, kept beyond the review screen's duplicate-press guard:
-  // that guard's 700ms window can expire while a still-unknown request from
-  // this batch may yet commit server-side, so a second submit must stay
-  // blocked until this one fully settles, not just past the press window.
-  const inFlightRef = useRef(false);
+  // The latch lives in the selection store, not this hook: a remounted
+  // review screen gets a fresh hook instance, and the duplicate-press guard
+  // it inherits expires after 700ms — an unknown request from this batch may
+  // still commit server-side long after that. The store flag also locks all
+  // basket/draft mutations for the flight's duration.
 
   const submitBatch = useCallback(
     async (drafts: MultiAddDraft[]): Promise<BatchSubmitResult | null> => {
-      if (inFlightRef.current || drafts.length === 0) return null;
-      inFlightRef.current = true;
+      if (
+        useFoodSearchSelectionStore.getState().isSubmitting ||
+        drafts.length === 0
+      ) {
+        return null;
+      }
+      useFoodSearchSelectionStore.getState().setSubmitting(true);
       setIsSubmitting(true);
 
       try {
@@ -167,7 +173,9 @@ export function useAddFoodEntriesBatch() {
           authHalted,
         };
       } finally {
-        inFlightRef.current = false;
+        // Clear the store latch first so the caller's post-batch
+        // reconciliation (removeKeys/setOutcomes) runs unlocked.
+        useFoodSearchSelectionStore.getState().setSubmitting(false);
         setIsSubmitting(false);
       }
     },

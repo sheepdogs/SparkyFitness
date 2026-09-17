@@ -1,6 +1,10 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { useFoodSearchSelection } from '../../src/hooks/useFoodSearchSelection';
-import { __resetFoodSearchSelectionStoreForTests } from '../../src/stores/foodSearchSelectionStore';
+import {
+  __resetFoodSearchSelectionStoreForTests,
+  useFoodSearchSelectionStore,
+} from '../../src/stores/foodSearchSelectionStore';
+import { convertDraftToPayload } from '../../src/utils/multiAddFoodEntries';
 import type { FoodItem } from '../../src/types/foods';
 
 function makeFood(id: string, variantId?: string): FoodItem {
@@ -202,7 +206,58 @@ describe('useFoodSearchSelection', () => {
     expect(result.current.count).toBe(0);
   });
 
-  test('a newly selected row seeds a draft defaulting to one serving and the given meal type', () => {
+  test('seeds the draft quantity from the variant serving size, not a serving count', () => {
+    // Regression (#1980 final review): a plain '1' logged one GRAM of a
+    // 100 g food while its row displayed "100 g" — quantity is denominated
+    // in the serving unit, matching FoodEntryAddScreen's own seeding.
+    const { result } = renderHook(() => useFoodSearchSelection());
+    const food = makeFood('f1', 'v1');
+    act(() => {
+      result.current.toggle(food);
+    });
+
+    const row = result.current.basketRows[0];
+    expect(row.quantityText).toBe('100');
+
+    const conversion = convertDraftToPayload({
+      food,
+      quantityText: row.quantityText,
+      mealTypeId: 'meal-1',
+      entryDate: '2026-09-16',
+    });
+    expect(conversion.status === 'ok' && conversion.payload.quantity).toBe(100);
+  });
+
+  test('basket and draft mutations are refused while a batch is submitting', () => {
+    const { result } = renderHook(() => useFoodSearchSelection());
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1'));
+    });
+
+    act(() => {
+      useFoodSearchSelectionStore.getState().setSubmitting(true);
+    });
+
+    // Duplicate submits, mid-flight removes, and draft edits must all no-op.
+    expect(result.current.toggle(makeFood('f2', 'v1'))).toBe(false);
+    act(() => {
+      result.current.removeKeys(['f1:v1']);
+      result.current.updateDraft('f1:v1', { quantityText: '5' });
+      result.current.clear();
+    });
+    expect(result.current.count).toBe(1);
+    expect(result.current.basketRows[0].quantityText).toBe('100');
+
+    act(() => {
+      useFoodSearchSelectionStore.getState().setSubmitting(false);
+    });
+    act(() => {
+      result.current.removeKeys(['f1:v1']);
+    });
+    expect(result.current.count).toBe(0);
+  });
+
+  test('a newly selected row seeds a draft defaulting to the serving size and the given meal type', () => {
     const { result } = renderHook(() => useFoodSearchSelection(50, 'meal-1'));
 
     act(() => {
@@ -212,7 +267,7 @@ describe('useFoodSearchSelection', () => {
     expect(result.current.basketRows).toEqual([
       expect.objectContaining({
         key: 'f1:v1',
-        quantityText: '1',
+        quantityText: '100',
         mealTypeId: 'meal-1',
         outcome: undefined,
       }),
@@ -243,7 +298,7 @@ describe('useFoodSearchSelection', () => {
     // A re-added row starts fresh — the prior draft/outcome do not resurface.
     expect(result.current.basketRows).toEqual([
       expect.objectContaining({
-        quantityText: '1',
+        quantityText: '100',
         mealTypeId: '',
         outcome: undefined,
       }),

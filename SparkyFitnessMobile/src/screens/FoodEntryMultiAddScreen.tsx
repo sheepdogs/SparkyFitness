@@ -4,9 +4,17 @@ import React, {
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { StackActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
@@ -25,6 +33,8 @@ import { DECIMAL_INPUT_REGEX, parseDecimalInput } from '../utils/numericInput';
 import { formatServingUnit } from '../utils/foodDetails';
 import { getMealTypeDisplayLabel } from '../utils/mealNutrition';
 import type { MultiAddDraft } from '../utils/multiAddFoodEntries';
+import { initialDraftQuantityText } from '../utils/multiAddFoodEntries';
+import { useFoodSearchSelectionStore } from '../stores/foodSearchSelectionStore';
 import type { RootStackScreenProps } from '../types/navigation';
 import type { MealType } from '../types/mealTypes';
 
@@ -66,6 +76,11 @@ const FoodEntryMultiAddScreen: React.FC<FoodEntryMultiAddScreenProps> = ({
   const selection = useFoodSearchSelection(undefined, routeMealTypeId);
   const { mealTypes, defaultMealTypeId } = useMealTypes();
   const resolvedDefaultMealTypeId = routeMealTypeId ?? defaultMealTypeId ?? '';
+  // The bulk picker's own selection. Bound separately from the route/app
+  // default: choosing Dinner must show Dinner on the trigger, not snap back
+  // to the default the screen opened with.
+  const [bulkMealTypeId, setBulkMealTypeId] = useState<string | null>(null);
+  const effectiveBulkMealTypeId = bulkMealTypeId ?? resolvedDefaultMealTypeId;
 
   // Backfill rows seeded without a meal type (opened generically, with no
   // route mealTypeId context) once the app default resolves. Guarded so it
@@ -149,8 +164,12 @@ const FoodEntryMultiAddScreen: React.FC<FoodEntryMultiAddScreenProps> = ({
         selection.setOutcomes(result.outcomes);
       }
 
-      const remaining = selection.count - result.succeededKeys.length;
-      if (remaining <= 0 && result.outcomes.length === 0) {
+      // Pop only when the basket is actually empty, read from the live
+      // store: the render-scoped selection.count is the pre-batch value,
+      // and rows removed through another surface during the flight change
+      // the real remainder. Invalid-quantity and unstarted rows keep the
+      // review open for the user to fix.
+      if (useFoodSearchSelectionStore.getState().selectedByKey.size === 0) {
         navigation.dispatch(StackActions.popToTop());
       }
     },
@@ -170,9 +189,19 @@ const FoodEntryMultiAddScreen: React.FC<FoodEntryMultiAddScreenProps> = ({
 
   // Back gesture disabled while a batch is in flight (§4): an unknown
   // request from it may still commit, so leaving mid-submit risks the user
-  // not seeing that outcome recorded on the row at all.
+  // not seeing that outcome recorded on the row at all. gestureEnabled only
+  // covers swipe navigation — Android's hardware back needs beforeRemove.
   useLayoutEffect(() => {
     navigation.setOptions({ gestureEnabled: !isSubmitting });
+  }, [navigation, isSubmitting]);
+
+  useEffect(() => {
+    if (!isSubmitting) return;
+    // preventDefault on beforeRemove blocks every removal route — hardware
+    // back, gestures, and header back alike — for the flight's duration.
+    return navigation.addListener('beforeRemove', (event) => {
+      event.preventDefault();
+    });
   }, [navigation, isSubmitting]);
 
   const header = useScreenHeader({
@@ -189,258 +218,271 @@ const FoodEntryMultiAddScreen: React.FC<FoodEntryMultiAddScreenProps> = ({
   });
 
   return (
-    <View className="flex-1 bg-background">
+    <View
+      className="flex-1 bg-background"
+      style={Platform.OS === 'android' ? { paddingTop: insets.top } : undefined}
+    >
       {header}
-      {selection.basketRows.length === 0 ? (
-        <View className="flex-1 items-center justify-center px-6">
-          <Text className="text-text-secondary text-base text-center">
-            {t('foodEntryMultiAdd.states.empty', {
-              defaultValue: 'No foods selected',
-            })}
-          </Text>
-        </View>
-      ) : (
-        <ScrollView
-          className="flex-1"
-          contentContainerClassName="px-4 pt-4 gap-3"
-          contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
-          keyboardShouldPersistTaps="handled"
-        >
-          <Text className="text-sm text-text-secondary">
-            {t('foodEntryMultiAdd.addingToDate', {
-              date: formatDateLabel(date, t, locale),
-              defaultValue: 'Adding to {{date}}',
-            })}
-          </Text>
-
-          <View className="flex-row items-center mt-1">
-            <Text className="text-text-secondary text-base mr-2">
-              {t('foodEntryMultiAdd.labels.meal', { defaultValue: 'Meal' })}
-            </Text>
-            <BottomSheetPicker
-              value={resolvedDefaultMealTypeId}
-              options={mealTypeOptions}
-              onSelect={(mealTypeId: string) =>
-                selection.applyMealTypeToAll(mealTypeId)
-              }
-              title={t('foodEntryMultiAdd.pickers.selectMeal', {
-                defaultValue: 'Select Meal',
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {selection.basketRows.length === 0 ? (
+          <View className="flex-1 items-center justify-center px-6">
+            <Text className="text-text-secondary text-base text-center">
+              {t('foodEntryMultiAdd.states.empty', {
+                defaultValue: 'No foods selected',
               })}
-              renderTrigger={({ onPress }) => (
-                <TouchableOpacity
-                  onPress={onPress}
-                  activeOpacity={0.7}
-                  className="flex-row items-center"
-                  accessibilityRole="button"
-                  accessibilityLabel={t(
-                    'foodEntryMultiAdd.accessibility.mealForAll',
-                    {
-                      meal: mealTypeLabel(resolvedDefaultMealTypeId),
-                      defaultValue: 'Meal for all items: {{meal}}',
-                    }
-                  )}
-                >
-                  <Text className="text-text-primary text-base font-medium mr-1">
-                    {mealTypeLabel(resolvedDefaultMealTypeId)}
-                  </Text>
-                  <Icon
-                    name="chevron-down"
-                    size={12}
-                    color={textMuted}
-                    weight="medium"
-                  />
-                </TouchableOpacity>
-              )}
-            />
+            </Text>
           </View>
+        ) : (
+          <ScrollView
+            className="flex-1"
+            contentContainerClassName="px-4 pt-4 gap-3"
+            contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text className="text-sm text-text-secondary">
+              {t('foodEntryMultiAdd.addingToDate', {
+                date: formatDateLabel(date, t, locale),
+                defaultValue: 'Adding to {{date}}',
+              })}
+            </Text>
 
-          {hasUnknownRows && (
-            <View className="mt-2 rounded-xl bg-raised border border-border-subtle p-3">
-              <Text
-                className="text-sm text-text-secondary"
-                accessibilityRole="alert"
-              >
-                {t('foodEntryMultiAdd.banners.unknownOutcome', {
-                  defaultValue:
-                    "Some items couldn't be added and may already be in your diary",
-                })}
+            <View className="flex-row items-center mt-1">
+              <Text className="text-text-secondary text-base mr-2">
+                {t('foodEntryMultiAdd.labels.meal', { defaultValue: 'Meal' })}
               </Text>
+              <BottomSheetPicker
+                value={effectiveBulkMealTypeId}
+                options={mealTypeOptions}
+                onSelect={(mealTypeId: string) => {
+                  setBulkMealTypeId(mealTypeId);
+                  selection.applyMealTypeToAll(mealTypeId);
+                }}
+                title={t('foodEntryMultiAdd.pickers.selectMeal', {
+                  defaultValue: 'Select Meal',
+                })}
+                renderTrigger={({ onPress }) => (
+                  <TouchableOpacity
+                    onPress={onPress}
+                    activeOpacity={0.7}
+                    className="flex-row items-center"
+                    accessibilityRole="button"
+                    accessibilityLabel={t(
+                      'foodEntryMultiAdd.accessibility.mealForAll',
+                      {
+                        meal: mealTypeLabel(effectiveBulkMealTypeId),
+                        defaultValue: 'Meal for all items: {{meal}}',
+                      }
+                    )}
+                  >
+                    <Text className="text-text-primary text-base font-medium mr-1">
+                      {mealTypeLabel(resolvedDefaultMealTypeId)}
+                    </Text>
+                    <Icon
+                      name="chevron-down"
+                      size={12}
+                      color={textMuted}
+                      weight="medium"
+                    />
+                  </TouchableOpacity>
+                )}
+              />
             </View>
-          )}
 
-          <View className="mt-2 gap-3">
-            {selection.basketRows.map((row) => {
-              const quantityValid = isRowQuantityValid(row);
-              return (
-                <View
-                  key={row.key}
-                  className="rounded-xl bg-surface p-4"
-                  accessibilityLabel={row.food.name}
+            {hasUnknownRows && (
+              <View className="mt-2 rounded-xl bg-raised border border-border-subtle p-3">
+                <Text
+                  className="text-sm text-text-secondary"
+                  accessibilityRole="alert"
                 >
-                  <View className="flex-row items-start justify-between">
-                    <View className="flex-1 mr-3">
-                      <Text className="text-base font-semibold text-text-primary">
-                        {row.food.name}
-                      </Text>
-                      {row.food.brand ? (
-                        <Text className="text-sm text-text-secondary mt-0.5">
-                          {row.food.brand}
+                  {t('foodEntryMultiAdd.banners.unknownOutcome', {
+                    defaultValue:
+                      "Some items couldn't be added and may already be in your diary",
+                  })}
+                </Text>
+              </View>
+            )}
+
+            <View className="mt-2 gap-3">
+              {selection.basketRows.map((row) => {
+                const quantityValid = isRowQuantityValid(row);
+                return (
+                  <View
+                    key={row.key}
+                    className="rounded-xl bg-surface p-4"
+                    accessibilityLabel={row.food.name}
+                  >
+                    <View className="flex-row items-start justify-between">
+                      <View className="flex-1 mr-3">
+                        <Text className="text-base font-semibold text-text-primary">
+                          {row.food.name}
                         </Text>
-                      ) : null}
-                      {/* i18n-audit-ignore-next-line hardcoded-ui-text -- quantity and unit are literal data values. */}
-                      <Text className="text-xs text-text-secondary mt-1">
-                        <>
-                          {row.food.default_variant.serving_size}{' '}
-                          {formatServingUnit(
-                            row.food.default_variant.serving_unit
-                          )}
-                        </>
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => selection.removeKeys([row.key])}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel={t(
-                        'foodEntryMultiAdd.actions.remove',
-                        {
-                          name: row.food.name,
-                          defaultValue: 'Remove {{name}}',
-                        }
-                      )}
-                    >
-                      <Icon name="trash" size={20} color={dangerColor} />
-                    </TouchableOpacity>
-                  </View>
-
-                  <View className="mt-3 flex-row items-center justify-between">
-                    <StepperInput
-                      value={row.quantityText}
-                      onChangeText={(text) => {
-                        if (DECIMAL_INPUT_REGEX.test(text)) {
-                          selection.updateDraft(row.key, {
-                            quantityText: text,
-                          });
-                        }
-                      }}
-                      onBlur={() => {
-                        if (!isRowQuantityValid(row)) {
-                          selection.updateDraft(row.key, {
-                            quantityText: '1',
-                          });
-                        }
-                      }}
-                      onIncrement={() =>
-                        selection.updateDraft(row.key, {
-                          quantityText: String(rowQuantity(row) + 1),
-                        })
-                      }
-                      onDecrement={() =>
-                        selection.updateDraft(row.key, {
-                          quantityText: String(
-                            Math.max(0, rowQuantity(row) - 1)
-                          ),
-                        })
-                      }
-                    />
-                    <BottomSheetPicker
-                      value={row.mealTypeId}
-                      options={mealTypeOptions}
-                      onSelect={(mealTypeId: string) =>
-                        selection.updateDraft(row.key, { mealTypeId })
-                      }
-                      title={t('foodEntryMultiAdd.pickers.selectMeal', {
-                        defaultValue: 'Select Meal',
-                      })}
-                      renderTrigger={({ onPress }) => (
-                        <TouchableOpacity
-                          onPress={onPress}
-                          activeOpacity={0.7}
-                          className="flex-row items-center rounded-full bg-raised px-3 py-1.5"
-                          accessibilityRole="button"
-                          accessibilityLabel={t(
-                            'foodEntryMultiAdd.accessibility.mealForRow',
-                            {
-                              food: row.food.name,
-                              meal: mealTypeLabel(row.mealTypeId),
-                              defaultValue: 'Meal for {{food}}: {{meal}}',
-                            }
-                          )}
-                        >
-                          <Text className="text-text-primary text-sm mr-1">
-                            {mealTypeLabel(row.mealTypeId)}
+                        {row.food.brand ? (
+                          <Text className="text-sm text-text-secondary mt-0.5">
+                            {row.food.brand}
                           </Text>
-                          <Icon
-                            name="chevron-down"
-                            size={10}
-                            color={textMuted}
-                            weight="medium"
-                          />
-                        </TouchableOpacity>
-                      )}
-                    />
-                  </View>
-
-                  {!quantityValid && (
-                    <Text
-                      className="mt-2 text-sm text-icon-danger"
-                      accessibilityRole="alert"
-                    >
-                      {t('foodEntryMultiAdd.errors.invalidQuantity', {
-                        defaultValue: 'Enter a quantity greater than zero.',
-                      })}
-                    </Text>
-                  )}
-                  {row.outcome === 'confirmed_rejected' && (
-                    <Text
-                      className="mt-2 text-sm text-icon-danger"
-                      accessibilityRole="alert"
-                    >
-                      {t('foodEntryMultiAdd.errors.rowRejected', {
-                        defaultValue:
-                          "Couldn't add this item. Check it and try again.",
-                      })}
-                    </Text>
-                  )}
-                  {row.outcome === 'unknown' && (
-                    <TouchableOpacity
-                      className="mt-2 self-start"
-                      onPress={() => handleAddAnyway(row)}
-                      disabled={isSubmitting}
-                      accessibilityRole="button"
-                      accessibilityLabel={t(
-                        'foodEntryMultiAdd.actions.addAnywayFor',
-                        {
-                          name: row.food.name,
-                          defaultValue: 'Add {{name}} anyway',
-                        }
-                      )}
-                    >
-                      <Text
-                        className="text-sm font-semibold"
-                        style={{ color: accentColor }}
+                        ) : null}
+                        {/* i18n-audit-ignore-next-line hardcoded-ui-text -- quantity and unit are literal data values. */}
+                        <Text className="text-xs text-text-secondary mt-1">
+                          <>
+                            {row.food.default_variant.serving_size}{' '}
+                            {formatServingUnit(
+                              row.food.default_variant.serving_unit
+                            )}
+                          </>
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => selection.removeKeys([row.key])}
+                        disabled={isSubmitting}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel={t(
+                          'foodEntryMultiAdd.actions.remove',
+                          {
+                            name: row.food.name,
+                            defaultValue: 'Remove {{name}}',
+                          }
+                        )}
                       >
-                        {t('foodEntryMultiAdd.actions.addAnyway', {
-                          defaultValue: 'Add anyway',
+                        <Icon name="trash" size={20} color={dangerColor} />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View className="mt-3 flex-row items-center justify-between">
+                      <StepperInput
+                        value={row.quantityText}
+                        onChangeText={(text) => {
+                          if (DECIMAL_INPUT_REGEX.test(text)) {
+                            selection.updateDraft(row.key, {
+                              quantityText: text,
+                            });
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!isRowQuantityValid(row)) {
+                            // Reset in the variant's serving unit, not '1' —
+                            // same denomination as the seed (one GRAM of a
+                            // 100 g food is not a sensible fallback).
+                            selection.updateDraft(row.key, {
+                              quantityText: initialDraftQuantityText(row.food),
+                            });
+                          }
+                        }}
+                        onIncrement={() =>
+                          selection.updateDraft(row.key, {
+                            quantityText: String(rowQuantity(row) + 1),
+                          })
+                        }
+                        onDecrement={() =>
+                          selection.updateDraft(row.key, {
+                            quantityText: String(
+                              Math.max(0, rowQuantity(row) - 1)
+                            ),
+                          })
+                        }
+                      />
+                      <BottomSheetPicker
+                        value={row.mealTypeId}
+                        options={mealTypeOptions}
+                        onSelect={(mealTypeId: string) =>
+                          selection.updateDraft(row.key, { mealTypeId })
+                        }
+                        title={t('foodEntryMultiAdd.pickers.selectMeal', {
+                          defaultValue: 'Select Meal',
+                        })}
+                        renderTrigger={({ onPress }) => (
+                          <TouchableOpacity
+                            onPress={onPress}
+                            activeOpacity={0.7}
+                            className="flex-row items-center rounded-full bg-raised px-3 py-1.5"
+                            accessibilityRole="button"
+                            accessibilityLabel={t(
+                              'foodEntryMultiAdd.accessibility.mealForRow',
+                              {
+                                food: row.food.name,
+                                meal: mealTypeLabel(row.mealTypeId),
+                                defaultValue: 'Meal for {{food}}: {{meal}}',
+                              }
+                            )}
+                          >
+                            <Text className="text-text-primary text-sm mr-1">
+                              {mealTypeLabel(row.mealTypeId)}
+                            </Text>
+                            <Icon
+                              name="chevron-down"
+                              size={10}
+                              color={textMuted}
+                              weight="medium"
+                            />
+                          </TouchableOpacity>
+                        )}
+                      />
+                    </View>
+
+                    {!quantityValid && (
+                      <Text
+                        className="mt-2 text-sm text-icon-danger"
+                        accessibilityRole="alert"
+                      >
+                        {t('foodEntryMultiAdd.errors.invalidQuantity', {
+                          defaultValue: 'Enter a quantity greater than zero.',
                         })}
                       </Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              );
-            })}
-          </View>
-        </ScrollView>
-      )}
+                    )}
+                    {row.outcome === 'confirmed_rejected' && (
+                      <Text
+                        className="mt-2 text-sm text-icon-danger"
+                        accessibilityRole="alert"
+                      >
+                        {t('foodEntryMultiAdd.errors.rowRejected', {
+                          defaultValue:
+                            "Couldn't add this item. Check it and try again.",
+                        })}
+                      </Text>
+                    )}
+                    {row.outcome === 'unknown' && (
+                      <TouchableOpacity
+                        className="mt-2 self-start"
+                        onPress={() => handleAddAnyway(row)}
+                        disabled={isSubmitting}
+                        accessibilityRole="button"
+                        accessibilityLabel={t(
+                          'foodEntryMultiAdd.actions.addAnywayFor',
+                          {
+                            name: row.food.name,
+                            defaultValue: 'Add {{name}} anyway',
+                          }
+                        )}
+                      >
+                        <Text
+                          className="text-sm font-semibold"
+                          style={{ color: accentColor }}
+                        >
+                          {t('foodEntryMultiAdd.actions.addAnyway', {
+                            defaultValue: 'Add anyway',
+                          })}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </ScrollView>
+        )}
 
-      <FooterSaveBar
-        label={addAllLabel}
-        busy={isSubmitting}
-        disabled={
-          isSubmitting || retryableRows.length === 0 || hasInvalidRetryableRow
-        }
-        onPress={handleAddAll}
-      />
+        <FooterSaveBar
+          label={addAllLabel}
+          busy={isSubmitting}
+          disabled={
+            isSubmitting || retryableRows.length === 0 || hasInvalidRetryableRow
+          }
+          onPress={handleAddAll}
+        />
+      </KeyboardAvoidingView>
     </View>
   );
 };

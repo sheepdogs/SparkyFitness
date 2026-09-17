@@ -10,6 +10,7 @@ import {
 } from './queryTestUtils';
 import type { MultiAddDraft } from '../../src/utils/multiAddFoodEntries';
 import type { FoodItem } from '../../src/types/foods';
+import { __resetFoodSearchSelectionStoreForTests } from '../../src/stores/foodSearchSelectionStore';
 
 jest.mock('../../src/services/api/foodEntriesApi', () => ({
   createFoodEntry: jest.fn(),
@@ -87,6 +88,9 @@ describe('useAddFoodEntriesBatch', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     queryClient = createTestQueryClient();
+    // The in-flight latch now lives in the selection store; without this a
+    // rejected test would leak isSubmitting=true into the next one.
+    __resetFoodSearchSelectionStoreForTests();
   });
 
   afterEach(() => queryClient.clear());

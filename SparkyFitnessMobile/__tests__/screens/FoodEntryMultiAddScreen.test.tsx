@@ -99,11 +99,22 @@ function keyFor(id: string) {
   return `${id}:variant-${id}`;
 }
 
+const beforeRemoveHandlers: ((event: {
+  preventDefault: () => void;
+}) => void)[] = [];
+
 const navigation = {
   goBack: jest.fn(),
   navigate: jest.fn(),
   dispatch: jest.fn(),
   setOptions: jest.fn(),
+  addListener: (
+    event: string,
+    handler: (e: { preventDefault: () => void }) => void
+  ) => {
+    if (event === 'beforeRemove') beforeRemoveHandlers.push(handler);
+    return () => {};
+  },
 } as any;
 
 function renderScreen(routeParams: Record<string, unknown> = {}) {
@@ -158,7 +169,7 @@ describe('FoodEntryMultiAddScreen', () => {
     expect(screen.getByText('Brand f0')).toBeTruthy();
     expect(screen.getByText('Food f1')).toBeTruthy();
     // Both rows default to one serving (quantityText '1').
-    expect(screen.getAllByDisplayValue('1')).toHaveLength(2);
+    expect(screen.getAllByDisplayValue('100')).toHaveLength(2);
   });
 
   test('removing a row drops it from the screen and the shared basket', () => {
@@ -178,7 +189,7 @@ describe('FoodEntryMultiAddScreen', () => {
     seedBasket([makeFood('f0')]);
     const screen = renderScreen();
 
-    fireEvent.changeText(screen.getByDisplayValue('1'), '0');
+    fireEvent.changeText(screen.getByDisplayValue('100'), '0');
 
     expect(
       screen.getByText('Enter a quantity greater than zero.')
@@ -191,24 +202,29 @@ describe('FoodEntryMultiAddScreen', () => {
     ).toMatchObject({ disabled: true });
   });
 
-  test('Add all is disabled and label-less while a batch is already submitting', () => {
+  test('Add all carries an accessible busy label, stays disabled while submitting, and hardware back is blocked', () => {
     seedBasket([makeFood('f0')]);
     mockUseAddFoodEntriesBatch.mockReturnValue({
       submitBatch,
       isSubmitting: true,
     });
+    beforeRemoveHandlers.length = 0;
     const screen = renderScreen();
 
-    // FooterSaveBar's Button swaps its label for a spinner while busy (the
-    // busy label it computes is not rendered in the loading branch); the
-    // important contract is that the action is disabled for the whole
-    // submission, not just past the duplicate-press window. The meal-type
-    // picker's trigger also declares role button, so pick by disabled state.
-    const addButton = screen
-      .getAllByRole('button')
-      .find((button) => button.props.accessibilityState?.disabled === true);
-    expect(addButton).toBeTruthy();
+    // FooterSaveBar's Button swaps its label for a spinner while busy, but
+    // the action now carries an explicit accessible name; it must stay
+    // disabled for the whole submission, and the screen must refuse removal
+    // (hardware back / gestures) mid-flight.
+    const busyButton = screen.getByRole('button', { name: 'Saving…' });
+    expect(busyButton.props.accessibilityState).toMatchObject({
+      disabled: true,
+    });
     expect(screen.queryByText('Add all (1)')).toBeNull();
+
+    expect(beforeRemoveHandlers.length).toBeGreaterThan(0);
+    const preventDefault = jest.fn();
+    beforeRemoveHandlers.forEach((handler) => handler({ preventDefault }));
+    expect(preventDefault).toHaveBeenCalled();
   });
 
   test('Add all submits every row as a draft, removes successes, and pops to top once the basket is empty', async () => {
@@ -228,7 +244,7 @@ describe('FoodEntryMultiAddScreen', () => {
     expect(submitBatch).toHaveBeenCalledWith([
       {
         food: expect.objectContaining({ id: 'f0' }),
-        quantityText: '1',
+        quantityText: '100',
         mealTypeId: 'meal-1',
         entryDate: '2026-09-16',
       },
