@@ -66,6 +66,7 @@ import { interleaveTopMatches } from '../utils/topMatches';
 import { mergeRecent, mergeFrequent, landingKey } from '../utils/landingLists';
 import type { LandingEntry } from '../utils/landingLists';
 import { useFoodSearchSelection } from '../hooks/useFoodSearchSelection';
+import { MULTI_ADD_MAX_ITEMS } from '../utils/multiAddFoodEntries';
 import { useHeaderActionColors } from '../hooks/useHeaderActionColors';
 import {
   createNativeHeaderAccentBadge,
@@ -210,7 +211,7 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
     toggle: toggleFoodSelection,
     addMany: addFoodsToSelection,
     clear: clearSelection,
-  } = useFoodSearchSelection();
+  } = useFoodSearchSelection(MULTI_ADD_MAX_ITEMS, mealTypeId);
   const [isSelectMode, setIsSelectMode] = useState(false);
   // Measured basket-bar height (onLayout) so the lists can reserve exactly
   // the room it needs — a fixed clearance breaks at larger text sizes, and
@@ -238,6 +239,10 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
     },
     [toggleFoodSelection, t, selectionMaxItems]
   );
+
+  const openMultiAddReview = useCallback(() => {
+    navigation.navigate('FoodEntryMultiAdd', { date, mealTypeId });
+  }, [navigation, date, mealTypeId]);
 
   const handleSelectAllInSection = useCallback(
     (entries: LandingEntry[]) => {
@@ -1447,21 +1452,38 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
               count: selectionCount,
             })}
           </Text>
-          <Button
-            variant="ghost"
-            onPress={clearSelection}
-            className="p-0"
-            accessibilityLabel={t('foodSearch.multiSelect.clear', {
-              defaultValue: 'Clear',
-            })}
-          >
-            <Text
-              className="text-sm font-semibold"
-              style={{ color: accentColor }}
+          <View className="flex-row items-center gap-4">
+            <Button
+              variant="ghost"
+              onPress={clearSelection}
+              className="p-0"
+              accessibilityLabel={t('foodSearch.multiSelect.clear', {
+                defaultValue: 'Clear',
+              })}
             >
-              {t('foodSearch.multiSelect.clear', { defaultValue: 'Clear' })}
-            </Text>
-          </Button>
+              <Text
+                className="text-sm font-semibold"
+                style={{ color: accentColor }}
+              >
+                {t('foodSearch.multiSelect.clear', { defaultValue: 'Clear' })}
+              </Text>
+            </Button>
+            <Button
+              variant="ghost"
+              onPress={openMultiAddReview}
+              className="p-0"
+              accessibilityLabel={t('foodSearch.multiSelect.review', {
+                defaultValue: 'Review',
+              })}
+            >
+              <Text
+                className="text-sm font-semibold"
+                style={{ color: accentColor }}
+              >
+                {t('foodSearch.multiSelect.review', { defaultValue: 'Review' })}
+              </Text>
+            </Button>
+          </View>
         </View>
       )}
       <AnchoredMenu

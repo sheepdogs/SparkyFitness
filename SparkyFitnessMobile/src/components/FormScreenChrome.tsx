@@ -58,6 +58,7 @@ export const FooterSaveBar: React.FC<FooterSaveBarProps> = ({
         onPress={handlePress}
         disabled={disabled}
         loading={busy}
+        accessibilityRole="button"
         className="py-3"
         textClassName="text-sm text-center"
       >

@@ -3105,6 +3105,42 @@
       "selectMeal": "Select Meal"
     }
   },
+  "foodEntryMultiAdd": {
+    "title": "Review",
+    "addingToDate": "Adding to {{date}}",
+    "labels": {
+      "meal": "Meal",
+      "chooseMeal": "Choose meal"
+    },
+    "pickers": {
+      "selectMeal": "Select Meal"
+    },
+    "accessibility": {
+      "mealForAll": "Meal for all items: {{meal}}",
+      "mealForRow": "Meal for {{food}}: {{meal}}"
+    },
+    "actions": {
+      "addAll_one": "Add all ({{count}})",
+      "addAll_other": "Add all ({{count}})",
+      "remove": "Remove {{name}}",
+      "addAnyway": "Add anyway",
+      "addAnywayFor": "Add {{name}} anyway"
+    },
+    "banners": {
+      "unknownOutcome": "Some items couldn't be added and may already be in your diary"
+    },
+    "errors": {
+      "invalidQuantity": "Enter a quantity greater than zero.",
+      "rowRejected": "Couldn't add this item. Check it and try again."
+    },
+    "states": {
+      "empty": "No foods selected"
+    },
+    "toasts": {
+      "added_one": "Added {{count}} food",
+      "added_other": "Added {{count}} foods"
+    }
+  },
   "exerciseSearch": {
     "title": "Exercises",
     "tabs": {
@@ -3200,6 +3236,7 @@
       "select": "Select",
       "cancel": "Cancel",
       "clear": "Clear",
+      "review": "Review",
       "selectAll": "Select all",
       "selected_one": "{{count}} selected",
       "selected_other": "{{count}} selected",
