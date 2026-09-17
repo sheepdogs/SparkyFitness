@@ -20,6 +20,7 @@ import {
   __resetAppPreferencesStoreForTests,
   useAppPreferencesStore,
 } from '../../src/stores/appPreferencesStore';
+import { __resetFoodSearchSelectionStoreForTests } from '../../src/stores/foodSearchSelectionStore';
 import type { Meal } from '../../src/types/meals';
 import type { FoodItem } from '../../src/types/foods';
 
@@ -150,6 +151,7 @@ describe('FoodSearchScreen multi-select', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     __resetAppPreferencesStoreForTests();
+    __resetFoodSearchSelectionStoreForTests();
     useAppPreferencesStore.setState({ foodSearchOwnershipFilter: 'all' });
     mockUseServerConnection.mockReturnValue({ isConnected: true } as any);
     mockUsePreferences.mockReturnValue({ preferences: {} } as any);

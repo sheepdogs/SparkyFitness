@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react-native';
 import { useFoodSearchSelection } from '../../src/hooks/useFoodSearchSelection';
+import { __resetFoodSearchSelectionStoreForTests } from '../../src/stores/foodSearchSelectionStore';
 import type { FoodItem } from '../../src/types/foods';
 
 function makeFood(id: string, variantId?: string): FoodItem {
@@ -21,6 +22,13 @@ function makeFood(id: string, variantId?: string): FoodItem {
 }
 
 describe('useFoodSearchSelection', () => {
+  // The basket now lives in a shared store (#1980 batch milestone) so
+  // FoodEntryMultiAddScreen sees the same live state FoodSearchScreen
+  // writes — reset it between tests or state leaks across cases.
+  beforeEach(() => {
+    __resetFoodSearchSelectionStoreForTests();
+  });
+
   test('toggle adds then removes a food', () => {
     const { result } = renderHook(() => useFoodSearchSelection());
     const food = makeFood('f1', 'v1');
@@ -192,5 +200,105 @@ describe('useFoodSearchSelection', () => {
       result.current.clear();
     });
     expect(result.current.count).toBe(0);
+  });
+
+  test('a newly selected row seeds a draft defaulting to one serving and the given meal type', () => {
+    const { result } = renderHook(() => useFoodSearchSelection(50, 'meal-1'));
+
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1'));
+    });
+
+    expect(result.current.basketRows).toEqual([
+      expect.objectContaining({
+        key: 'f1:v1',
+        quantityText: '1',
+        mealTypeId: 'meal-1',
+        outcome: undefined,
+      }),
+    ]);
+  });
+
+  test('removing a row drops its draft and outcome, not just the selection', () => {
+    const { result } = renderHook(() => useFoodSearchSelection());
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1'));
+    });
+    act(() => {
+      result.current.updateDraft('f1:v1', { quantityText: '2' });
+      result.current.setOutcomes([{ key: 'f1:v1', status: 'unknown' }]);
+    });
+    expect(result.current.basketRows[0]).toEqual(
+      expect.objectContaining({ quantityText: '2', outcome: 'unknown' })
+    );
+
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1')); // deselect
+    });
+    expect(result.current.basketRows).toEqual([]);
+
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1')); // reselect
+    });
+    // A re-added row starts fresh — the prior draft/outcome do not resurface.
+    expect(result.current.basketRows).toEqual([
+      expect.objectContaining({
+        quantityText: '1',
+        mealTypeId: '',
+        outcome: undefined,
+      }),
+    ]);
+  });
+
+  test('updateDraft is a no-op for a key that has left the basket', () => {
+    const { result } = renderHook(() => useFoodSearchSelection());
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1'));
+      result.current.toggle(makeFood('f1', 'v1')); // deselect
+    });
+
+    act(() => {
+      result.current.updateDraft('f1:v1', { quantityText: '9' });
+    });
+
+    expect(result.current.basketRows).toEqual([]);
+  });
+
+  test('applyMealTypeToAll sets every row to the same meal type', () => {
+    const { result } = renderHook(() => useFoodSearchSelection(50, 'meal-1'));
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1'));
+      result.current.toggle(makeFood('f2', 'v1'));
+    });
+    act(() => {
+      result.current.updateDraft('f1:v1', { mealTypeId: 'meal-2' });
+    });
+
+    act(() => {
+      result.current.applyMealTypeToAll('meal-3');
+    });
+
+    expect(result.current.basketRows.map((row) => row.mealTypeId)).toEqual([
+      'meal-3',
+      'meal-3',
+    ]);
+  });
+
+  test('the basket, drafts, and outcomes are shared across independent hook instances', () => {
+    // Regression for the route-param snapshot problem this store replaced:
+    // FoodSearchScreen and FoodEntryMultiAddScreen each call the hook fresh,
+    // and must see the same live basket, not a copy frozen at navigation.
+    const search = renderHook(() => useFoodSearchSelection());
+    const review = renderHook(() => useFoodSearchSelection());
+
+    act(() => {
+      search.result.current.toggle(makeFood('f1', 'v1'));
+    });
+    expect(review.result.current.count).toBe(1);
+
+    act(() => {
+      review.result.current.updateDraft('f1:v1', { quantityText: '3' });
+    });
+    expect(search.result.current.basketRows[0].quantityText).toBe('3');
   });
 });

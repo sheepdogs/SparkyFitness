@@ -1,45 +1,57 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { FoodItem } from '../types/foods';
 import {
   MULTI_ADD_MAX_ITEMS,
   multiAddKeyForFood,
 } from '../utils/multiAddFoodEntries';
+import { useFoodSearchSelectionStore } from '../stores/foodSearchSelectionStore';
+import type {
+  AddManyResult,
+  FoodDraftFields,
+  RowOutcomeStatus,
+} from '../stores/foodSearchSelectionStore';
 
-/**
- * Basket state for multi-select food logging on the food search screen.
- *
- * The basket is keyed by multiAddKeyForFood so the same food appearing in
- * several landing sections (Recently Logged / Top / Favorites) collapses to
- * one row, while different variants stay distinct. Enforces a hard item cap;
- * callers decide how to surface a rejected add (e.g. a toast) using the
- * returned counts so this hook stays free of presentation concerns.
- */
-export interface AddManyResult {
-  added: number;
-  /**
-   * True when at least one distinct (not already-selected) food was dropped
-   * because the basket hit its cap. Duplicates never set this — a smaller
-   * `added` alone can mean nothing but duplicates.
-   */
-  truncated: boolean;
+export type { AddManyResult, FoodDraftFields, RowOutcomeStatus };
+
+export interface BasketRow {
+  key: string;
+  food: FoodItem;
+  quantityText: string;
+  mealTypeId: string;
+  outcome?: RowOutcomeStatus;
 }
 
-export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
-  // The ref is the synchronous source of truth; the state is only its
-  // render-time projection. Capacity decisions must hold across several
-  // calls inside one React batch, where a state closure is stale — the same
-  // stale-state-under-batched-updates shape utils/duplicatePress.ts guards
-  // against (#2191). Every mutation updates the ref first, then publishes an
-  // immutable copy to state.
-  const basketRef = useRef<Map<string, FoodItem>>(new Map());
-  const [selectedByKey, setSelectedByKey] = useState<Map<string, FoodItem>>(
-    () => new Map()
+/**
+ * Basket state for multi-select food logging (#1980) — a thin selector hook
+ * over useFoodSearchSelectionStore, so FoodSearchScreen and
+ * FoodEntryMultiAddScreen (which the plan's batch milestone design
+ * requirements say must not hold this state locally) both read and write the
+ * same live basket instead of a snapshot frozen at navigation time. See the
+ * store for the state-sharing rationale.
+ *
+ * `maxItems` and `initialMealTypeId` are read by this hook instance and
+ * threaded into the store's mutators on every call, rather than configured
+ * once on the shared store — the store itself carries no per-caller config,
+ * only the basket contents.
+ */
+export function useFoodSearchSelection(
+  maxItems: number = MULTI_ADD_MAX_ITEMS,
+  /** Seeded onto every newly-selected row's draft; '' when not yet known (the
+   * review screen backfills from the app default meal type on mount). */
+  initialMealTypeId?: string
+) {
+  const selectedByKey = useFoodSearchSelectionStore((s) => s.selectedByKey);
+  const drafts = useFoodSearchSelectionStore((s) => s.drafts);
+  const outcomes = useFoodSearchSelectionStore((s) => s.outcomes);
+  const storeToggle = useFoodSearchSelectionStore((s) => s.toggle);
+  const storeAddMany = useFoodSearchSelectionStore((s) => s.addMany);
+  const removeKeys = useFoodSearchSelectionStore((s) => s.removeKeys);
+  const clear = useFoodSearchSelectionStore((s) => s.clear);
+  const updateDraft = useFoodSearchSelectionStore((s) => s.updateDraft);
+  const applyMealTypeToAll = useFoodSearchSelectionStore(
+    (s) => s.applyMealTypeToAll
   );
-
-  const commit = useCallback((next: Map<string, FoodItem>) => {
-    basketRef.current = next;
-    setSelectedByKey(next);
-  }, []);
+  const setOutcomes = useFoodSearchSelectionStore((s) => s.setOutcomes);
 
   const selectedFoods = useMemo(
     () => Array.from(selectedByKey.values()),
@@ -56,77 +68,38 @@ export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
 
   /**
    * Toggles one food. Returns true when the basket changed; false when the
-   * add was rejected because the basket is at capacity. The outcome is
-   * accurate even when several toggles run inside one React batch.
+   * add was rejected because the basket is at capacity.
    */
   const toggle = useCallback(
-    (food: FoodItem): boolean => {
-      const current = basketRef.current;
-      const key = multiAddKeyForFood(food);
-      if (current.has(key)) {
-        const next = new Map(current);
-        next.delete(key);
-        commit(next);
-        return true;
-      }
-      if (current.size >= maxItems) {
-        return false;
-      }
-      const next = new Map(current);
-      next.set(key, food);
-      commit(next);
-      return true;
-    },
-    [commit, maxItems]
+    (food: FoodItem): boolean => storeToggle(food, maxItems, initialMealTypeId),
+    [storeToggle, maxItems, initialMealTypeId]
   );
 
   /**
    * Adds many foods (select-all). Deduplicates against the basket and stops
-   * at the cap. Returns what actually happened — computed against the live
-   * basket ref, so back-to-back calls inside one React batch still report
-   * truncation correctly.
+   * at the cap. Returns what actually happened.
    */
   const addMany = useCallback(
-    (foods: FoodItem[]): AddManyResult => {
-      const next = new Map(basketRef.current);
-      let added = 0;
-      let truncated = false;
-      for (const food of foods) {
+    (foods: FoodItem[]): AddManyResult =>
+      storeAddMany(foods, maxItems, initialMealTypeId),
+    [storeAddMany, maxItems, initialMealTypeId]
+  );
+
+  const basketRows = useMemo<BasketRow[]>(
+    () =>
+      selectedFoods.map((food) => {
         const key = multiAddKeyForFood(food);
-        if (next.has(key)) continue;
-        if (next.size >= maxItems) {
-          truncated = true;
-          break;
-        }
-        next.set(key, food);
-        added++;
-      }
-      if (added === 0) return { added: 0, truncated };
-      commit(next);
-      return { added, truncated };
-    },
-    [commit, maxItems]
+        const draft = drafts.get(key);
+        return {
+          key,
+          food,
+          quantityText: draft?.quantityText ?? '1',
+          mealTypeId: draft?.mealTypeId ?? initialMealTypeId ?? '',
+          outcome: outcomes.get(key),
+        };
+      }),
+    [selectedFoods, drafts, outcomes, initialMealTypeId]
   );
-
-  /** Removes basket rows by key, e.g. confirmed successes after a batch. */
-  const removeKeys = useCallback(
-    (keys: readonly string[]) => {
-      if (keys.length === 0) return;
-      const current = basketRef.current;
-      if (!keys.some((key) => current.has(key))) return;
-      const next = new Map(current);
-      for (const key of keys) {
-        next.delete(key);
-      }
-      commit(next);
-    },
-    [commit]
-  );
-
-  const clear = useCallback(() => {
-    if (basketRef.current.size === 0) return;
-    commit(new Map());
-  }, [commit]);
 
   return {
     selectedFoods,
@@ -138,6 +111,12 @@ export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
     addMany,
     removeKeys,
     clear,
+    /** Combined per-row view (food + draft + last outcome) for the review
+     * screen; FoodSearchScreen only needs selectedFoods/isSelected/count. */
+    basketRows,
+    updateDraft,
+    applyMealTypeToAll,
+    setOutcomes,
   };
 }
 
