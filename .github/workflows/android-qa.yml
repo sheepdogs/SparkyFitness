@@ -6,6 +6,9 @@ name: Build Android Debug APK (QA)
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "qa-*"
 
 jobs:
   build:
