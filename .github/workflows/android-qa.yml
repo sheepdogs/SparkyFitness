@@ -59,7 +59,7 @@ jobs:
         run: |
           echo "sdk.dir=$ANDROID_HOME" > SparkyFitnessMobile/android/local.properties
 
-      - name: Run Gradle to generate codegen (mirrors android.yml: tolerated failure)
+      - name: Run Gradle to generate codegen (tolerated failure, mirrors android.yml)
         run: |
           cd SparkyFitnessMobile/android
           ./gradlew :app:assembleDebug || true
