@@ -134,7 +134,10 @@ const FoodScanScreen: React.FC<FoodScanScreenProps> = ({
 
   // Photo estimation always logs to the diary; hide it for meal-builder
   // scans so we don't drop the user into a flow that ignores pickerMode.
-  // capture-barcode mode is barcode-only.
+  // Same for basket-origin scans: the photo flow's success pop goes to the
+  // diary root, which would unmount FoodSearchScreen and silently drop the
+  // in-progress multi-select basket. capture-barcode mode is barcode-only.
+  const isBasketOriginScan = pickerMode === 'log-entry' && returnDepth != null;
   const scanSegments = useMemo(() => {
     if (isCaptureBarcodeMode) {
       return SCAN_SEGMENTS.filter((key) => key === 'barcode').map((key) => ({
@@ -143,7 +146,7 @@ const FoodScanScreen: React.FC<FoodScanScreenProps> = ({
       }));
     }
     return (
-      isSelectionMode
+      isSelectionMode || isBasketOriginScan
         ? SCAN_SEGMENTS.filter((key) => key !== 'photo')
         : SCAN_SEGMENTS
     ).map((key) => ({
@@ -155,7 +158,7 @@ const FoodScanScreen: React.FC<FoodScanScreenProps> = ({
             ? t('foodScan.segment.label', { defaultValue: 'Label' })
             : t('foodScan.segment.photo', { defaultValue: 'Photo' }),
     }));
-  }, [isCaptureBarcodeMode, isSelectionMode, t]);
+  }, [isCaptureBarcodeMode, isSelectionMode, isBasketOriginScan, t]);
 
   const aiSettingQuery = useActiveAiServiceSetting({
     // Skip the AI gating fetch in capture-barcode mode — Photo segment is
@@ -616,7 +619,9 @@ const FoodScanScreen: React.FC<FoodScanScreenProps> = ({
     if (scanMode !== 'photo') return;
     if (aiSettingQuery.isLoading) return;
 
-    if (!photoModeAvailable) {
+    // Belt-and-braces for deep links: a photo initialMode can arrive with a
+    // basket-origin returnDepth even though the segment is filtered above.
+    if (!photoModeAvailable || isBasketOriginScan) {
       setPhotoGateVisible(true);
       return;
     }
@@ -638,6 +643,7 @@ const FoodScanScreen: React.FC<FoodScanScreenProps> = ({
     scanMode,
     aiSettingQuery.isLoading,
     photoModeAvailable,
+    isBasketOriginScan,
     navigation,
     date,
     mealTypeId,

@@ -212,6 +212,15 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
     clear: clearSelection,
   } = useFoodSearchSelection();
   const [isSelectMode, setIsSelectMode] = useState(false);
+  // Measured basket-bar height (onLayout) so the lists can reserve exactly
+  // the room it needs — a fixed clearance breaks at larger text sizes, and
+  // the explicit contentContainerStyle replaces (not adds to) the
+  // safe-area padding the className provides, so the inset is added here.
+  const [basketBarHeight, setBasketBarHeight] = useState(64);
+  const basketListPadding =
+    selectionCount > 0
+      ? { paddingBottom: basketBarHeight + insets.bottom + 24 }
+      : undefined;
 
   const handleToggleFoodSelection = useCallback(
     (food: FoodItem) => {
@@ -235,14 +244,8 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
       const foods = entries
         .filter((entry) => entry.kind === 'food')
         .map((entry) => entry.food);
-      const uniquePending = foods.filter(
-        (food) => !isFoodSelected(food)
-      ).length;
-      addFoodsToSelection(foods);
-      // addMany dedupes silently (rightly), so truncation is detected from
-      // the basket's remaining headroom rather than its return count — a
-      // smaller return alone can mean nothing but duplicates.
-      if (selectionCount + uniquePending > selectionMaxItems) {
+      const { truncated } = addFoodsToSelection(foods);
+      if (truncated) {
         Toast.show({
           type: 'error',
           text1: t('foodSearch.multiSelect.limitReached', {
@@ -252,7 +255,7 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
         });
       }
     },
-    [addFoodsToSelection, isFoodSelected, selectionCount, selectionMaxItems, t]
+    [addFoodsToSelection, selectionMaxItems, t]
   );
 
   // Single-tap flows launched while a basket exists must return here (depth
@@ -1308,9 +1311,7 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="on-drag"
             contentContainerClassName="pb-safe-or-4"
-            contentContainerStyle={
-              selectionCount > 0 ? { paddingBottom: 88 } : undefined
-            }
+            contentContainerStyle={basketListPadding}
           />
         </View>
       );
@@ -1410,9 +1411,7 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           contentContainerClassName="pb-safe-or-4"
-          contentContainerStyle={
-            selectionCount > 0 ? { paddingBottom: 88 } : undefined
-          }
+          contentContainerStyle={basketListPadding}
         />
       </View>
     );
@@ -1432,6 +1431,9 @@ const FoodSearchScreen: React.FC<FoodSearchScreenProps> = ({
         <View
           className="absolute left-4 right-4 rounded-xl bg-raised border border-border-subtle flex-row items-center justify-between px-4 py-3"
           style={{ bottom: insets.bottom + 12 }}
+          onLayout={(event) =>
+            setBasketBarHeight(event.nativeEvent.layout.height)
+          }
         >
           <Text
             className="text-text-primary text-sm font-semibold"

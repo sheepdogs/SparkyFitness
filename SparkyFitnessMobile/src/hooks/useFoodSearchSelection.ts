@@ -14,6 +14,16 @@ import {
  * callers decide how to surface a rejected add (e.g. a toast) using the
  * returned counts so this hook stays free of presentation concerns.
  */
+export interface AddManyResult {
+  added: number;
+  /**
+   * True when at least one distinct (not already-selected) food was dropped
+   * because the basket hit its cap. Duplicates never set this — a smaller
+   * `added` alone can mean nothing but duplicates.
+   */
+  truncated: boolean;
+}
+
 export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
   // The ref is the synchronous source of truth; the state is only its
   // render-time projection. Capacity decisions must hold across several
@@ -72,23 +82,28 @@ export function useFoodSearchSelection(maxItems: number = MULTI_ADD_MAX_ITEMS) {
 
   /**
    * Adds many foods (select-all). Deduplicates against the basket and stops
-   * at the cap. Returns how many foods were actually added so the caller can
-   * report a truncated selection.
+   * at the cap. Returns what actually happened — computed against the live
+   * basket ref, so back-to-back calls inside one React batch still report
+   * truncation correctly.
    */
   const addMany = useCallback(
-    (foods: FoodItem[]): number => {
+    (foods: FoodItem[]): AddManyResult => {
       const next = new Map(basketRef.current);
       let added = 0;
+      let truncated = false;
       for (const food of foods) {
-        if (next.size >= maxItems) break;
         const key = multiAddKeyForFood(food);
         if (next.has(key)) continue;
+        if (next.size >= maxItems) {
+          truncated = true;
+          break;
+        }
         next.set(key, food);
         added++;
       }
-      if (added === 0) return 0;
+      if (added === 0) return { added: 0, truncated };
       commit(next);
-      return added;
+      return { added, truncated };
     },
     [commit, maxItems]
   );

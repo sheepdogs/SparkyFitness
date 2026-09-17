@@ -432,11 +432,14 @@ describe('FoodEntryAddScreen', () => {
       isPending: false,
       invalidateCache: mockInvalidateCache,
     }));
-    mockUseAddFoodEntryMeal.mockReturnValue({
-      addMeal: mockAddMeal,
+    mockUseAddFoodEntryMeal.mockImplementation((options) => ({
+      addMeal: (input: any) => {
+        mockAddMeal(input);
+        options?.onSuccess?.();
+      },
       isPending: false,
       invalidateCache: mockInvalidateMealCache,
-    });
+    }));
   });
 
   it('stores a pending ingredient and pops back for local foods in meal-builder mode', async () => {
@@ -1021,6 +1024,32 @@ describe('FoodEntryAddScreen', () => {
     });
 
     fireEvent.press(screen.getByText('Add Food'));
+
+    expect(mockPop).toHaveBeenCalledWith(1);
+    expect(mockPopToTop).not.toHaveBeenCalled();
+  });
+
+  it('returns to the diary root after a plain meal add', () => {
+    const screen = renderScreen({
+      item: baseMealItem,
+      date: '2026-04-23',
+    });
+
+    fireEvent.press(screen.getByText('Add Meal'));
+
+    expect(mockInvalidateMealCache).toHaveBeenCalled();
+    expect(mockPopToTop).toHaveBeenCalledTimes(1);
+    expect(mockPop).not.toHaveBeenCalled();
+  });
+
+  it('pops back one screen after a meal add launched with a basket returnDepth', () => {
+    const screen = renderScreen({
+      item: baseMealItem,
+      date: '2026-04-23',
+      returnDepth: 1,
+    });
+
+    fireEvent.press(screen.getByText('Add Meal'));
 
     expect(mockPop).toHaveBeenCalledWith(1);
     expect(mockPopToTop).not.toHaveBeenCalled();

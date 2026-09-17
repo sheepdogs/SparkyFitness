@@ -113,9 +113,9 @@ describe('useFoodSearchSelection', () => {
       result.current.toggle(makeFood('f1', 'v1'));
     });
 
-    let added = 0;
+    let outcome: { added: number; truncated: boolean } | undefined;
     act(() => {
-      added = result.current.addMany([
+      outcome = result.current.addMany([
         makeFood('f1', 'v1'), // duplicate of what is already selected
         makeFood('f2', 'v1'),
         makeFood('f3', 'v1'),
@@ -123,13 +123,48 @@ describe('useFoodSearchSelection', () => {
       ]);
     });
 
-    expect(added).toBe(2);
+    expect(outcome).toEqual({ added: 2, truncated: true });
     expect(result.current.count).toBe(3);
     expect(result.current.selectedFoods.map((food) => food.id)).toEqual([
       'f1',
       'f2',
       'f3',
     ]);
+  });
+
+  test('addMany reports no truncation when only duplicates were skipped', () => {
+    const { result } = renderHook(() => useFoodSearchSelection(5));
+    act(() => {
+      result.current.toggle(makeFood('f1', 'v1'));
+    });
+
+    let outcome: { added: number; truncated: boolean } | undefined;
+    act(() => {
+      outcome = result.current.addMany([makeFood('f1', 'v1')]);
+    });
+
+    expect(outcome).toEqual({ added: 0, truncated: false });
+  });
+
+  test('addMany truncation stays honest across calls inside one batch', () => {
+    // Two select-alls from different sections in a single act(): the second
+    // must report truncation against the first call's committed basket, not
+    // a stale render closure.
+    const { result } = renderHook(() => useFoodSearchSelection(2));
+
+    let first: { added: number; truncated: boolean } | undefined;
+    let second: { added: number; truncated: boolean } | undefined;
+    act(() => {
+      first = result.current.addMany([
+        makeFood('f1', 'v1'),
+        makeFood('f2', 'v1'),
+      ]);
+      second = result.current.addMany([makeFood('f3', 'v1')]);
+    });
+
+    expect(first).toEqual({ added: 2, truncated: false });
+    expect(second).toEqual({ added: 0, truncated: true });
+    expect(result.current.count).toBe(2);
   });
 
   test('removeKeys drops submitted rows and keeps the rest of the basket', () => {
